@@ -135,3 +135,66 @@ func TestSecurityEventJSON(t *testing.T) {
 		t.Errorf("timestamp %v is outside the test interval", parsedTimestamp)
 	}
 }
+
+func TestPortScanConfigFromEnv(t *testing.T) {
+	t.Run("disabled without target", func(t *testing.T) {
+		t.Setenv("PORT_SCAN_TARGET", "")
+
+		_, selected, err := portScanConfigFromEnv()
+		if err != nil {
+			t.Fatalf("portScanConfigFromEnv() error = %v", err)
+		}
+		if selected {
+			t.Fatal("port scan selected without PORT_SCAN_TARGET")
+		}
+	})
+
+	t.Run("valid loopback configuration", func(t *testing.T) {
+		t.Setenv("PORT_SCAN_TARGET", "127.0.0.1")
+		t.Setenv("START_PORT", "1")
+		t.Setenv("END_PORT", "1024")
+		t.Setenv("WORKER_COUNT", "100")
+
+		got, selected, err := portScanConfigFromEnv()
+		if err != nil {
+			t.Fatalf("portScanConfigFromEnv() error = %v", err)
+		}
+		if !selected {
+			t.Fatal("port scan not selected")
+		}
+		want := portScanConfig{target: "127.0.0.1", startPort: 1, endPort: 1024, workerCount: 100}
+		if got != want {
+			t.Errorf("portScanConfigFromEnv() = %+v, want %+v", got, want)
+		}
+	})
+
+	tests := []struct {
+		name        string
+		target      string
+		startPort   string
+		endPort     string
+		workerCount string
+	}{
+		{name: "non-loopback target", target: "192.0.2.1", startPort: "1", endPort: "10", workerCount: "1"},
+		{name: "invalid port range", target: "127.0.0.1", startPort: "0", endPort: "10", workerCount: "1"},
+		{name: "start port above maximum", target: "127.0.0.1", startPort: "65536", endPort: "65536", workerCount: "1"},
+		{name: "invalid worker count", target: "127.0.0.1", startPort: "1", endPort: "10", workerCount: "0"},
+		{name: "missing start port", target: "127.0.0.1", endPort: "10", workerCount: "1"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("PORT_SCAN_TARGET", tt.target)
+			t.Setenv("START_PORT", tt.startPort)
+			t.Setenv("END_PORT", tt.endPort)
+			t.Setenv("WORKER_COUNT", tt.workerCount)
+
+			_, selected, err := portScanConfigFromEnv()
+			if err == nil {
+				t.Fatal("portScanConfigFromEnv() error = nil, want error")
+			}
+			if !selected {
+				t.Fatal("port scan should remain selected for invalid configuration")
+			}
+		})
+	}
+}

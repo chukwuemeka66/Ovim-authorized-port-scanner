@@ -1,5 +1,23 @@
 # Authorized Port Scanner
 
+## Local port scan
+
+Set `PORT_SCAN_TARGET` to a loopback IP address to enable scan-only mode. The
+scanner rejects non-loopback targets in this mode. Set the inclusive port range
+and worker count, then run `go run .`:
+
+```powershell
+$env:PORT_SCAN_TARGET = "127.0.0.1"
+$env:START_PORT = "1"
+$env:END_PORT = "1024"
+$env:WORKER_COUNT = "100"
+go run .
+```
+
+This mode prints scan results and does not send them to Splunk or a Flask
+receiver. `START_PORT` and `END_PORT` must be between 1 and 65535, and
+`WORKER_COUNT` must be greater than zero.
+
 ## JPEG validation
 
 `ValidateJPEG` checks that in-memory data starts with the JPEG marker `FF D8 FF`

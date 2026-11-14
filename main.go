@@ -6,8 +6,10 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 )
 
@@ -90,6 +92,58 @@ func envOrDefault(name, fallback string) string {
 	return fallback
 }
 
+type portScanConfig struct {
+	target      string
+	startPort   int
+	endPort     int
+	workerCount int
+}
+
+func portScanConfigFromEnv() (portScanConfig, bool, error) {
+	target := os.Getenv("PORT_SCAN_TARGET")
+	if target == "" {
+		return portScanConfig{}, false, nil
+	}
+	ip := net.ParseIP(target)
+	if ip == nil || !ip.IsLoopback() {
+		return portScanConfig{}, true, fmt.Errorf("PORT_SCAN_TARGET must be a loopback IP address")
+	}
+
+	parseInt := func(name string) (int, error) {
+		value, err := strconv.Atoi(os.Getenv(name))
+		if err != nil {
+			return 0, fmt.Errorf("%s must be an integer: %w", name, err)
+		}
+		return value, nil
+	}
+
+	startPort, err := parseInt("START_PORT")
+	if err != nil {
+		return portScanConfig{}, true, err
+	}
+	endPort, err := parseInt("END_PORT")
+	if err != nil {
+		return portScanConfig{}, true, err
+	}
+	workerCount, err := parseInt("WORKER_COUNT")
+	if err != nil {
+		return portScanConfig{}, true, err
+	}
+	if startPort < 1 || startPort > 65535 || endPort > 65535 || startPort > endPort {
+		return portScanConfig{}, true, fmt.Errorf("START_PORT and END_PORT must define an inclusive range from 1 to 65535")
+	}
+	if workerCount < 1 {
+		return portScanConfig{}, true, fmt.Errorf("WORKER_COUNT must be greater than zero")
+	}
+
+	return portScanConfig{
+		target:      target,
+		startPort:   startPort,
+		endPort:     endPort,
+		workerCount: workerCount,
+	}, true, nil
+}
+
 func main() {
 	// 1. Define command-line flags for dynamic configuration
 	targetFlag := flag.String("target", envOrDefault("SPLUNK_HEC_URL", "https://localhost:8088/services/collector"), "Splunk HEC event endpoint")
@@ -108,8 +162,12 @@ func main() {
 	if carveSelected && (*carveImageFlag == "" || *carveOutputFlag == "") {
 		log.Fatal("[-] -carve-image and -carve-output must be provided together")
 	}
+	scanConfig, scanSelected, err := portScanConfigFromEnv()
+	if err != nil {
+		log.Fatalf("[-] Invalid port scan configuration: %v", err)
+	}
 	selectedIntegrations := 0
-	for _, selected := range []bool{*xbowFindingsFlag, *nodeZeroPathsFlag, *nodeZeroToSplunkFlag, *trackingServerFlag, carveSelected} {
+	for _, selected := range []bool{*xbowFindingsFlag, *nodeZeroPathsFlag, *nodeZeroToSplunkFlag, *trackingServerFlag, carveSelected, scanSelected} {
 		if selected {
 			selectedIntegrations++
 		}
@@ -118,6 +176,10 @@ func main() {
 		log.Fatal("[-] Choose only one security findings integration per run")
 	}
 
+	if scanSelected {
+		RunAuthorizedPortScan(scanConfig.target, scanConfig.startPort, scanConfig.endPort, scanConfig.workerCount)
+		return
+	}
 	if *xbowFindingsFlag {
 		client := NewXBOWClient(os.Getenv("XBOW_API_KEY"))
 		findings, err := client.FetchAndLogFindings(*xbowAssetIDFlag)

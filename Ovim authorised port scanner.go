@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"net"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -10,7 +11,7 @@ import (
 // worker picks ports from the jobs channel and tests connectivity.
 func scanWorker(_ int, ports <-chan int, results chan<- string, targetHost string) {
 	for port := range ports {
-		address := fmt.Sprintf("%s:%d", targetHost, port)
+		address := net.JoinHostPort(targetHost, strconv.Itoa(port))
 		conn, err := net.DialTimeout("tcp", address, time.Second)
 		if err != nil {
 			results <- fmt.Sprintf("[-] Port %d: CLOSED", port)
