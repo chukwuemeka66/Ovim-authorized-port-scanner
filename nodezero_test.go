@@ -184,19 +184,23 @@ func TestFetchAndLogAttackPathsReportsGraphQLErrors(t *testing.T) {
 			_, _ = w.Write([]byte(`{"token":"test-token"}`))
 			return
 		}
-		_, _ = w.Write([]byte(`{"data":{"attackPaths":[]},"errors":[{"message":"query denied"}]}`))
+		_, _ = w.Write([]byte(`{"data":{"attackPaths":[{"id":"partial-path"}]},"errors":[{"message":"query denied"}]}`))
 	}))
 	defer server.Close()
 
+	logPath := filepath.Join(t.TempDir(), "security_events.log")
 	client := NewNodeZeroClient()
 	client.AuthURL = server.URL + "/auth"
 	client.GraphQLURL = server.URL + "/graphql"
 	client.APIKey = strings.Join([]string{"test", "key"}, "-")
 	client.HTTPClient = server.Client()
-	client.LogPath = filepath.Join(t.TempDir(), "security_events.log")
+	client.LogPath = logPath
 
 	if _, err := client.FetchAndLogAttackPaths(); err == nil || !strings.Contains(err.Error(), "query denied") {
 		t.Fatalf("FetchAndLogAttackPaths() error = %v, want GraphQL error message", err)
+	}
+	if _, err := os.Stat(logPath); !os.IsNotExist(err) {
+		t.Errorf("security event log exists after GraphQL error; stat error = %v", err)
 	}
 }
 
@@ -207,7 +211,7 @@ func TestFetchDetailedAttackPathsReportsGraphQLErrors(t *testing.T) {
 			_, _ = w.Write([]byte(`{"token":"test-token"}`))
 			return
 		}
-		_, _ = w.Write([]byte(`{"data":{"attackPaths":[]},"errors":[{"message":"detailed query denied"}]}`))
+		_, _ = w.Write([]byte(`{"data":{"attackPaths":[{"id":"partial-path"}]},"errors":[{"message":"detailed query denied"}]}`))
 	}))
 	defer server.Close()
 

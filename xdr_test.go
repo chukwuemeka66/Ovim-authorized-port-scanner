@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -121,6 +122,66 @@ func TestForwardEventsToConfiguredXDR(t *testing.T) {
 		!strings.Contains(received[1].Details, "example.internal") ||
 		!strings.Contains(received[1].Details, "192.0.2.10") {
 		t.Errorf("NodeZero event = %+v, want attack-path metadata", received[1])
+	}
+}
+
+func TestNodeZeroAttackPathsForwardToXDR(t *testing.T) {
+	nodeZeroServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/auth":
+			_, _ = w.Write([]byte(`{"token":"nodezero-test-token"}`))
+		case "/graphql":
+			if got := r.Header.Get("Authorization"); got != "Bearer nodezero-test-token" {
+				t.Errorf("NodeZero Authorization = %q, want bearer token", got)
+			}
+			_, _ = w.Write([]byte(`{"data":{"attackPaths":[{"id":"path-xdr-1","severity":"Critical","attackPathTitle":"Exposed service","ipAddress":"192.0.2.25","hostName":"app.internal"}]}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer nodeZeroServer.Close()
+
+	var received SecurityEvent
+	xdrServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer xdr-test-key" {
+			t.Errorf("XDR Authorization = %q, want bearer token", got)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+			t.Errorf("decode XDR event: %v", err)
+		}
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer xdrServer.Close()
+
+	t.Setenv("XDR_ENDPOINT_URL", xdrServer.URL)
+	t.Setenv("XDR_API_KEY", "xdr-test-key")
+
+	client := NewNodeZeroClient()
+	client.AuthURL = nodeZeroServer.URL + "/auth"
+	client.GraphQLURL = nodeZeroServer.URL + "/graphql"
+	client.APIKey = "nodezero-test-key"
+	client.HTTPClient = nodeZeroServer.Client()
+	client.LogPath = filepath.Join(t.TempDir(), "security_events.log")
+
+	paths, err := client.FetchAndLogAttackPaths()
+	if err != nil {
+		t.Fatalf("FetchAndLogAttackPaths() error = %v", err)
+	}
+	if err := forwardEventsToConfiguredXDR(nodeZeroAttackPathSecurityEvents(paths)); err != nil {
+		t.Fatalf("forward NodeZero attack paths to XDR: %v", err)
+	}
+
+	if received.EventType != "NODEZERO_ATTACK_PATH" ||
+		received.Status != "DETECTED" ||
+		received.Source != "NodeZero" ||
+		received.EventID != "path-xdr-1" ||
+		received.Severity != "Critical" ||
+		received.Timestamp == "" ||
+		!strings.Contains(received.Details, "Exposed service") ||
+		!strings.Contains(received.Details, "app.internal") ||
+		!strings.Contains(received.Details, "192.0.2.25") {
+		t.Errorf("XDR event = %+v, want NodeZero attack-path details", received)
 	}
 }
 
