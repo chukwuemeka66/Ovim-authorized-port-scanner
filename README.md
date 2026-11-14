@@ -88,6 +88,15 @@ Set these variables to ship NodeZero attack-path metadata to Splunk:
 
 Keep the HEC token private and do not commit it to the repository.
 
+## XDR forwarding
+
+Set both `XDR_ENDPOINT_URL` and `XDR_API_KEY` to enable optional XDR forwarding.
+The endpoint must use HTTPS except for loopback tests, and the API key is sent
+as a bearer token. When configured, the default `SECURITY_SCAN_EVENT` and
+NodeZero attack-path metadata are forwarded to XDR alongside existing
+destinations. If either variable is set without the other, forwarding reports
+a configuration error.
+
 ## Local tracking endpoint
 
 Run `go run main.go nodezero.go splunk_ship.go xbow.go tracking.go -tracking-server`

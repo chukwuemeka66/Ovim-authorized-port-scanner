@@ -151,6 +151,66 @@ func TestShipAttackPathsToSplunkReportsHTTPError(t *testing.T) {
 	}
 }
 
+func TestShipNodeZeroAttackPathsToConfiguredDestinations(t *testing.T) {
+	var splunkPath DetailedAttackPath
+	splunkServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Splunk splunk-test-token" {
+			t.Errorf("Splunk Authorization = %q, want configured HEC token", got)
+		}
+		var payload struct {
+			Event DetailedAttackPath `json:"event"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Errorf("decode Splunk payload: %v", err)
+		}
+		splunkPath = payload.Event
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer splunkServer.Close()
+
+	var xdrEvent SecurityEvent
+	xdrServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer xdr-test-key" {
+			t.Errorf("XDR Authorization = %q, want bearer token", got)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&xdrEvent); err != nil {
+			t.Errorf("decode XDR event: %v", err)
+		}
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer xdrServer.Close()
+
+	t.Setenv("SPLUNK_HEC_URL", splunkServer.URL)
+	t.Setenv("SPLUNK_HEC_TOKEN", "splunk-test-token")
+	t.Setenv("XDR_ENDPOINT_URL", xdrServer.URL)
+	t.Setenv("XDR_API_KEY", "xdr-test-key")
+	path := DetailedAttackPath{
+		ID:              "path-1",
+		Severity:        "High",
+		AttackPathTitle: "Example path",
+		IPAddress:       "192.0.2.10",
+		HostName:        "example.internal",
+		Timestamp:       "2026-11-14T12:00:00Z",
+	}
+
+	if err := shipNodeZeroAttackPathsToDestinations([]DetailedAttackPath{path}); err != nil {
+		t.Fatalf("shipNodeZeroAttackPathsToDestinations() error = %v", err)
+	}
+	if splunkPath != path {
+		t.Errorf("Splunk path = %+v, want %+v", splunkPath, path)
+	}
+	if xdrEvent.EventType != "NODEZERO_ATTACK_PATH" ||
+		xdrEvent.Source != "NodeZero" ||
+		xdrEvent.EventID != path.ID ||
+		xdrEvent.Severity != path.Severity ||
+		xdrEvent.Timestamp != path.Timestamp ||
+		!strings.Contains(xdrEvent.Details, path.AttackPathTitle) ||
+		!strings.Contains(xdrEvent.Details, path.IPAddress) ||
+		!strings.Contains(xdrEvent.Details, path.HostName) {
+		t.Errorf("XDR event = %+v, want NodeZero path metadata", xdrEvent)
+	}
+}
+
 func TestShipRecoveryEventsToSplunk(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/services/collector" {

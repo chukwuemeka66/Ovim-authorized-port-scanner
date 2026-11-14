@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -67,15 +68,19 @@ func sendLog(target, token string, client *http.Client, payload []byte) (*http.R
 // SendLogToSplunkHEC sends a security event to the Splunk HEC event endpoint.
 func SendLogToSplunkHEC(splunkURL, hecToken, eventType, status string) (*http.Response, error) {
 	now := time.Now().UTC()
+	return sendSecurityEventToSplunkHEC(splunkURL, hecToken, SecurityEvent{
+		Timestamp: now.Format(time.RFC3339),
+		EventType: eventType,
+		Status:    status,
+	})
+}
+
+func sendSecurityEventToSplunkHEC(splunkURL, hecToken string, event SecurityEvent) (*http.Response, error) {
 	payload, err := json.Marshal(hecEvent{
-		Time:       now.Unix(),
+		Time:       time.Now().Unix(),
 		Host:       "local-scanner-node",
 		Sourcetype: "ovimscannerjson",
-		Event: SecurityEvent{
-			Timestamp: now.Format(time.RFC3339),
-			EventType: eventType,
-			Status:    status,
-		},
+		Event:      event,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal HEC payload: %w", err)
@@ -144,6 +149,40 @@ func portScanConfigFromEnv() (portScanConfig, bool, error) {
 	}, true, nil
 }
 
+func forwardSecurityEventToDestinations(splunkURL, hecToken string, event SecurityEvent) (*http.Response, error) {
+	resp, splunkErr := sendSecurityEventToSplunkHEC(splunkURL, hecToken, event)
+	xdrErr := forwardEventsToConfiguredXDR([]SecurityEvent{event})
+
+	if splunkErr != nil {
+		splunkErr = fmt.Errorf("Splunk HEC: %w", splunkErr)
+	}
+	if xdrErr != nil {
+		xdrErr = fmt.Errorf("XDR: %w", xdrErr)
+	}
+	if err := errors.Join(splunkErr, xdrErr); err != nil {
+		if resp != nil {
+			if closeErr := resp.Body.Close(); closeErr != nil {
+				err = errors.Join(err, fmt.Errorf("close Splunk HEC response: %w", closeErr))
+			}
+		}
+		return nil, err
+	}
+	return resp, nil
+}
+
+func shipNodeZeroAttackPathsToDestinations(paths []DetailedAttackPath) error {
+	splunkErr := ShipAttackPathsToSplunk(paths)
+	xdrErr := forwardEventsToConfiguredXDR(detailedNodeZeroAttackPathSecurityEvents(paths))
+
+	if splunkErr != nil {
+		splunkErr = fmt.Errorf("Splunk HEC: %w", splunkErr)
+	}
+	if xdrErr != nil {
+		xdrErr = fmt.Errorf("XDR: %w", xdrErr)
+	}
+	return errors.Join(splunkErr, xdrErr)
+}
+
 func main() {
 	// 1. Define command-line flags for dynamic configuration
 	targetFlag := flag.String("target", envOrDefault("SPLUNK_HEC_URL", "https://localhost:8088/services/collector"), "Splunk HEC event endpoint")
@@ -196,6 +235,9 @@ func main() {
 		if err != nil {
 			log.Fatalf("Failed to fetch and log NodeZero attack paths: %v", err)
 		}
+		if err := forwardEventsToConfiguredXDR(nodeZeroAttackPathSecurityEvents(paths)); err != nil {
+			log.Fatalf("Failed to forward NodeZero attack paths to XDR: %v", err)
+		}
 		log.Printf("Successfully processed and logged %d attack paths.", len(paths))
 		return
 	}
@@ -206,10 +248,10 @@ func main() {
 		if err != nil {
 			log.Fatalf("[-] Failed to fetch NodeZero attack paths: %v", err)
 		}
-		if err := ShipAttackPathsToSplunk(paths); err != nil {
-			log.Fatalf("[-] Failed to ship NodeZero attack paths to Splunk: %v", err)
+		if err := shipNodeZeroAttackPathsToDestinations(paths); err != nil {
+			log.Fatalf("[-] Failed to ship NodeZero attack paths: %v", err)
 		}
-		log.Printf("[+] Shipped %d NodeZero attack paths to Splunk", len(paths))
+		log.Printf("[+] Processed %d NodeZero attack paths through configured destinations", len(paths))
 		return
 	}
 	if *trackingServerFlag {
@@ -246,9 +288,14 @@ func main() {
 	fmt.Printf("[*] Initializing log transmission to target: %s\n", *targetFlag)
 
 	// 2. Send the security event directly to Splunk HEC with retry and backoff.
-	resp, err := SendLogToSplunkHEC(*targetFlag, *hecTokenFlag, "SECURITY_SCAN_EVENT", "SUCCESS")
+	event := SecurityEvent{
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+		EventType: "SECURITY_SCAN_EVENT",
+		Status:    "SUCCESS",
+	}
+	resp, err := forwardSecurityEventToDestinations(*targetFlag, *hecTokenFlag, event)
 	if err != nil {
-		log.Fatalf("[-] Failed to send log after all attempts: %v", err)
+		log.Fatalf("[-] Failed to forward security event: %v", err)
 	}
 	defer resp.Body.Close()
 

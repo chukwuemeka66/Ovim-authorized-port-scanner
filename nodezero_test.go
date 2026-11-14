@@ -195,7 +195,29 @@ func TestFetchAndLogAttackPathsReportsGraphQLErrors(t *testing.T) {
 	client.HTTPClient = server.Client()
 	client.LogPath = filepath.Join(t.TempDir(), "security_events.log")
 
-	if _, err := client.FetchAndLogAttackPaths(); err == nil {
-		t.Fatal("FetchAndLogAttackPaths() error = nil, want GraphQL error")
+	if _, err := client.FetchAndLogAttackPaths(); err == nil || !strings.Contains(err.Error(), "query denied") {
+		t.Fatalf("FetchAndLogAttackPaths() error = %v, want GraphQL error message", err)
+	}
+}
+
+func TestFetchDetailedAttackPathsReportsGraphQLErrors(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/auth" {
+			_, _ = w.Write([]byte(`{"token":"test-token"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"data":{"attackPaths":[]},"errors":[{"message":"detailed query denied"}]}`))
+	}))
+	defer server.Close()
+
+	client := NewNodeZeroClient()
+	client.AuthURL = server.URL + "/auth"
+	client.GraphQLURL = server.URL + "/graphql"
+	client.APIKey = "test-key"
+	client.HTTPClient = server.Client()
+
+	if _, err := client.FetchDetailedAttackPaths(); err == nil || !strings.Contains(err.Error(), "detailed query denied") {
+		t.Fatalf("FetchDetailedAttackPaths() error = %v, want GraphQL error message", err)
 	}
 }

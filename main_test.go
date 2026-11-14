@@ -198,3 +198,52 @@ func TestPortScanConfigFromEnv(t *testing.T) {
 		})
 	}
 }
+
+func TestForwardSecurityEventToDestinations(t *testing.T) {
+	var splunkEvent SecurityEvent
+	splunkServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Splunk splunk-test-token" {
+			t.Errorf("Splunk Authorization = %q, want configured HEC token", got)
+		}
+		var payload hecEvent
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Errorf("decode Splunk payload: %v", err)
+		}
+		splunkEvent = payload.Event
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer splunkServer.Close()
+
+	var xdrEvent SecurityEvent
+	xdrServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer xdr-test-key" {
+			t.Errorf("XDR Authorization = %q, want bearer token", got)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&xdrEvent); err != nil {
+			t.Errorf("decode XDR event: %v", err)
+		}
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer xdrServer.Close()
+
+	t.Setenv("XDR_ENDPOINT_URL", xdrServer.URL)
+	t.Setenv("XDR_API_KEY", "xdr-test-key")
+	event := SecurityEvent{
+		Timestamp: "2026-11-14T12:00:00Z",
+		EventType: "SECURITY_SCAN_EVENT",
+		Status:    "SUCCESS",
+	}
+
+	resp, err := forwardSecurityEventToDestinations(splunkServer.URL, "splunk-test-token", event)
+	if err != nil {
+		t.Fatalf("forwardSecurityEventToDestinations() error = %v", err)
+	}
+	defer resp.Body.Close()
+
+	if splunkEvent != event {
+		t.Errorf("Splunk event = %+v, want %+v", splunkEvent, event)
+	}
+	if xdrEvent != event {
+		t.Errorf("XDR event = %+v, want %+v", xdrEvent, event)
+	}
+}
