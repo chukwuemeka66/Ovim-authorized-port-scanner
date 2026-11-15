@@ -90,12 +90,11 @@ Keep the HEC token private and do not commit it to the repository.
 
 In PowerShell, configure the HEC URL and token in the current session, then run
 the secure launcher from the repository root. It prompts for the NodeZero API
-key as a secure string and clears the process environment variable when it
-finishes:
+key and, unless already set in the environment, the HEC token as secure strings.
+It clears the temporary process environment values when it finishes:
 
 ```powershell
 $env:SPLUNK_HEC_URL = "https://your-splunk-instance:8088/services/collector"
-$env:SPLUNK_HEC_TOKEN = "<your-hec-token>"
 .\nodezero-to-splunk.ps1
 ```
 
