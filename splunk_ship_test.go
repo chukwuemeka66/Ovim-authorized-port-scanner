@@ -111,7 +111,7 @@ func TestShipAttackPathsToSplunk(t *testing.T) {
 			return
 		}
 		if payload.Time == 0 || payload.Host != "nodezero-scanner-01" ||
-			payload.Source != "nodezero_ai_offensive" || payload.Sourcetype != "_json" {
+			payload.Source != "authorized-port-scanner" || payload.Sourcetype != "_json" {
 			t.Errorf("payload metadata = %+v, unexpected values", payload)
 		}
 		if payload.Event.ID != "path-1" || payload.Event.Severity != "High" ||

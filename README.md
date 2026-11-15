@@ -88,6 +88,24 @@ Set these variables to ship NodeZero attack-path metadata to Splunk:
 
 Keep the HEC token private and do not commit it to the repository.
 
+In PowerShell, configure the HEC URL and token in the current session, then run
+the secure launcher from the repository root. It prompts for the NodeZero API
+key as a secure string and clears the process environment variable when it
+finishes:
+
+```powershell
+$env:SPLUNK_HEC_URL = "https://your-splunk-instance:8088/services/collector"
+$env:SPLUNK_HEC_TOKEN = "<your-hec-token>"
+.\nodezero-to-splunk.ps1
+```
+
+NodeZero HEC events use `source="authorized-port-scanner"` and
+`sourcetype="_json"`. Search for them with:
+
+```spl
+index=* source="authorized-port-scanner"
+```
+
 ## XDR forwarding
 
 Set both `XDR_ENDPOINT_URL` and `XDR_API_KEY` to enable optional XDR forwarding.

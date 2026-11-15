@@ -45,7 +45,7 @@ func ShipAttackPathsToSplunk(paths []DetailedAttackPath) error {
 		body, err := json.Marshal(SplunkHECPayload{
 			Time:       time.Now().Unix(),
 			Host:       "nodezero-scanner-01",
-			Source:     "nodezero_ai_offensive",
+			Source:     "authorized-port-scanner",
 			SourceType: "_json",
 			Event:      event,
 		})
