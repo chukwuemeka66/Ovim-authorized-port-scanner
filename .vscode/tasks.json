@@ -7,6 +7,8 @@
 			"command": "go",
 			"args": [
 				"build",
+				"-o",
+				"authorized-port-scanner.exe",
 				"."
 			],
 			"group": {
