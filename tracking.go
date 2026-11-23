@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net"
@@ -12,6 +13,30 @@ import (
 	"sync"
 	"time"
 )
+
+type trackingLocationExample struct {
+	IP          string  `json:"ip"`
+	City        string  `json:"city"`
+	Region      string  `json:"region"`
+	CountryName string  `json:"country_name"`
+	Latitude    float64 `json:"latitude"`
+	Longitude   float64 `json:"longitude"`
+}
+
+func handleLocationExample(w http.ResponseWriter, _ *http.Request) {
+	example := trackingLocationExample{
+		IP:          "197.210.x.x",
+		City:        "Lagos",
+		Region:      "Lagos",
+		CountryName: "Nigeria",
+		Latitude:    6.5244,
+		Longitude:   3.3792,
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(example); err != nil {
+		log.Printf("Failed to write location example: %v", err)
+	}
+}
 
 func GenerateTrackingToken(length int) (string, error) {
 	if length <= 0 {
@@ -121,5 +146,6 @@ func newTrackingHandler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/track", handleTrackingRequest)
 	mux.HandleFunc("/click", HandleTrackClick)
+	mux.HandleFunc("/location-example", handleLocationExample)
 	return mux
 }

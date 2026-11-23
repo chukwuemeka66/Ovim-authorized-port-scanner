@@ -117,6 +117,8 @@ a configuration error.
 ## Local tracking endpoint
 
 Run `go run main.go nodezero.go splunk_ship.go xbow.go tracking.go -tracking-server`
-to start an opt-in tracking endpoint at `http://127.0.0.1:8080/track`. It logs
-the direct peer IP address and ignores `X-Forwarded-For`; the listener is bound
-to loopback and is not exposed to other machines by default.
+to start opt-in local endpoints. `/track` logs the direct peer IP address and
+ignores `X-Forwarded-For`; `/location-example` returns the supplied static
+Lagos, Nigeria geolocation sample and does not look up or enrich the requesting
+IP. The listener is bound to loopback and is not exposed to other machines by
+default.

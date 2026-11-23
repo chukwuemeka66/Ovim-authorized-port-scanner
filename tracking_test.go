@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"log"
 	"net/http"
 	"net/http/httptest"
@@ -44,6 +45,35 @@ func TestTrackingHandlerOnlyServesTrackPath(t *testing.T) {
 
 	if response.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want %d", response.Code, http.StatusNotFound)
+	}
+}
+
+func TestLocationExampleReturnsStaticJSON(t *testing.T) {
+	request := httptest.NewRequest(http.MethodGet, "/location-example", nil)
+	response := httptest.NewRecorder()
+
+	newTrackingHandler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusOK)
+	}
+	if got := response.Header().Get("Content-Type"); got != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", got)
+	}
+	var got struct {
+		IP          string  `json:"ip"`
+		City        string  `json:"city"`
+		Region      string  `json:"region"`
+		CountryName string  `json:"country_name"`
+		Latitude    float64 `json:"latitude"`
+		Longitude   float64 `json:"longitude"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode location example: %v", err)
+	}
+	if got.IP != "197.210.x.x" || got.City != "Lagos" || got.Region != "Lagos" ||
+		got.CountryName != "Nigeria" || got.Latitude != 6.5244 || got.Longitude != 3.3792 {
+		t.Errorf("location example = %+v, want supplied static example", got)
 	}
 }
 
