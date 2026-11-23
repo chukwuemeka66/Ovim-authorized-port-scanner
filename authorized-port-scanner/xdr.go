@@ -1,0 +1,133 @@
+package main
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"net/url"
+	"os"
+	"strings"
+	"time"
+)
+
+func validateXDREndpoint(rawURL string) error {
+	parsed, err := url.Parse(rawURL)
+	if err != nil || parsed.Hostname() == "" || parsed.User != nil ||
+		parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" {
+		return fmt.Errorf("invalid XDR endpoint URL")
+	}
+	if parsed.Scheme == "https" {
+		return nil
+	}
+	if parsed.Scheme == "http" {
+		host := parsed.Hostname()
+		if strings.EqualFold(host, "localhost") {
+			return nil
+		}
+		if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+			return nil
+		}
+	}
+	return fmt.Errorf("XDR endpoint must use HTTPS (HTTP is allowed only for loopback tests)")
+}
+
+// ForwardToXDR sends a security event to an XDR endpoint using bearer-token authentication.
+func ForwardToXDR(endpointURL, apiKey string, event SecurityEvent) error {
+	if strings.TrimSpace(apiKey) == "" {
+		return fmt.Errorf("XDR API key is required")
+	}
+	if err := validateXDREndpoint(endpointURL); err != nil {
+		return err
+	}
+
+	body, err := json.Marshal(event)
+	if err != nil {
+		return fmt.Errorf("encode XDR security event: %w", err)
+	}
+	req, err := http.NewRequest(http.MethodPost, endpointURL, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("create XDR request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("send XDR security event: %w", err)
+	}
+	_, readErr := io.Copy(io.Discard, io.LimitReader(resp.Body, 4<<10))
+	closeErr := resp.Body.Close()
+	if readErr != nil {
+		return fmt.Errorf("read XDR response: %w", readErr)
+	}
+	if closeErr != nil {
+		return fmt.Errorf("close XDR response: %w", closeErr)
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("XDR endpoint returned unexpected HTTP status %s", resp.Status)
+	}
+	return nil
+}
+
+func forwardEventsToConfiguredXDR(events []SecurityEvent) error {
+	endpointURL := strings.TrimSpace(os.Getenv("XDR_ENDPOINT_URL"))
+	apiKey := strings.TrimSpace(os.Getenv("XDR_API_KEY"))
+	if endpointURL == "" && apiKey == "" {
+		return nil
+	}
+	if endpointURL == "" || apiKey == "" {
+		return fmt.Errorf("XDR_ENDPOINT_URL and XDR_API_KEY must both be set")
+	}
+
+	for i, event := range events {
+		if err := ForwardToXDR(endpointURL, apiKey, event); err != nil {
+			return fmt.Errorf("forward security event %d to XDR: %w", i+1, err)
+		}
+	}
+	return nil
+}
+
+func nodeZeroAttackPathSecurityEvent(timestamp, id, severity, title, ipAddress, hostName string) SecurityEvent {
+	if timestamp == "" {
+		timestamp = time.Now().UTC().Format(time.RFC3339)
+	}
+	return SecurityEvent{
+		Timestamp: timestamp,
+		EventType: "NODEZERO_ATTACK_PATH",
+		Status:    "DETECTED",
+		Source:    "NodeZero",
+		EventID:   id,
+		Severity:  severity,
+		Details:   fmt.Sprintf("title=%q host=%q ip=%q", title, hostName, ipAddress),
+	}
+}
+
+func nodeZeroAttackPathSecurityEvents(paths []NodeZeroAttackPath) []SecurityEvent {
+	events := make([]SecurityEvent, 0, len(paths))
+	for _, path := range paths {
+		events = append(events, nodeZeroAttackPathSecurityEvent(
+			"", path.ID, path.Severity, path.AttackPathTitle, path.IPAddress, path.HostName,
+		))
+	}
+	return events
+}
+
+func detailedNodeZeroAttackPathSecurityEvents(paths []DetailedAttackPath) []SecurityEvent {
+	events := make([]SecurityEvent, 0, len(paths))
+	for _, path := range paths {
+		events = append(events, nodeZeroAttackPathSecurityEvent(
+			path.Timestamp, path.ID, path.Severity, path.AttackPathTitle, path.IPAddress, path.HostName,
+		))
+	}
+	return events
+}
