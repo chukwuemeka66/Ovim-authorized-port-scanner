@@ -88,10 +88,22 @@ Set these variables to ship NodeZero attack-path metadata to Splunk:
 
 Keep the HEC token private and do not commit it to the repository.
 
-In PowerShell, configure the HEC URL and token in the current session, then run
-the secure launcher from the repository root. It prompts for the NodeZero API
-key and, unless already set in the environment, the HEC token as secure strings.
-It clears the temporary process environment values when it finishes:
+For other PowerShell workflows, set the HEC URL and token in the current session.
+Replace the example host and token with your Splunk instance and HEC token:
+
+```powershell
+$env:SPLUNK_HEC_URL = "https://your-splunk-host:8088"
+$env:SPLUNK_HEC_TOKEN = "replace-with-your-hec-token"
+```
+
+The collector path `/services/collector` is added automatically when it is
+omitted. These environment values apply only to the current PowerShell session.
+
+To send NodeZero attack-path metadata, set the URL and run the secure launcher
+from the repository root. It prompts for the NodeZero API key and, unless the
+token is already set in the environment, the HEC token as secure strings. It
+restores or removes the temporary API-key and token environment values when it
+finishes:
 
 ```powershell
 $env:SPLUNK_HEC_URL = "https://your-splunk-instance:8088/services/collector"

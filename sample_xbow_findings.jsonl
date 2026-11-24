@@ -1,0 +1,2 @@
+{"finding_id":"XBOW-001","severity":"high","target":"192.168.1.50","port":443,"vulnerability":"TLS 1.0 Enabled"}
+{"finding_id":"XBOW-002","severity":"critical","target":"192.168.1.50","port":22,"vulnerability":"Weak SSH Cipher"}
