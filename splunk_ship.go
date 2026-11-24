@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -42,7 +43,7 @@ func ShipAttackPathsToSplunk(paths []DetailedAttackPath) error {
 		if err != nil {
 			return fmt.Errorf("encode NodeZero attack path %q: %w", path.ID, err)
 		}
-		body, err := json.Marshal(SplunkHECPayload{
+		err = postToSplunkHEC(context.Background(), client, endpoint, splunkToken, SplunkHECPayload{
 			Time:       time.Now().Unix(),
 			Host:       "nodezero-scanner-01",
 			Source:     "authorized-port-scanner",
@@ -50,30 +51,7 @@ func ShipAttackPathsToSplunk(paths []DetailedAttackPath) error {
 			Event:      event,
 		})
 		if err != nil {
-			return fmt.Errorf("encode Splunk HEC payload for NodeZero attack path %q: %w", path.ID, err)
-		}
-
-		req, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(body))
-		if err != nil {
-			return fmt.Errorf("create Splunk HEC request for NodeZero attack path %q: %w", path.ID, err)
-		}
-		req.Header.Set("Authorization", "Splunk "+splunkToken)
-		req.Header.Set("Content-Type", "application/json")
-
-		resp, err := client.Do(req)
-		if err != nil {
 			return fmt.Errorf("send NodeZero attack path %q to Splunk HEC: %w", path.ID, err)
-		}
-		_, readErr := io.Copy(io.Discard, resp.Body)
-		closeErr := resp.Body.Close()
-		if readErr != nil {
-			return fmt.Errorf("read Splunk HEC response for NodeZero attack path %q: %w", path.ID, readErr)
-		}
-		if closeErr != nil {
-			return fmt.Errorf("close Splunk HEC response for NodeZero attack path %q: %w", path.ID, closeErr)
-		}
-		if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-			return fmt.Errorf("Splunk HEC rejected NodeZero attack path %q: unexpected HTTP status %s", path.ID, resp.Status)
 		}
 	}
 	return nil
@@ -101,7 +79,7 @@ func ShipRecoveryEventsToSplunk(events []RecoveryEvent) error {
 		if err != nil {
 			return fmt.Errorf("encode recovered-file event at offset %d: %w", recoveryEvent.OffsetStart, err)
 		}
-		body, err := json.Marshal(SplunkHECPayload{
+		err = postToSplunkHEC(context.Background(), client, endpoint, splunkToken, SplunkHECPayload{
 			Time:       time.Now().Unix(),
 			Host:       "local-scanner-node",
 			Source:     "Ovim-Gallery-Carver",
@@ -109,31 +87,37 @@ func ShipRecoveryEventsToSplunk(events []RecoveryEvent) error {
 			Event:      event,
 		})
 		if err != nil {
-			return fmt.Errorf("encode Splunk HEC payload for recovered file at offset %d: %w", recoveryEvent.OffsetStart, err)
-		}
-
-		req, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(body))
-		if err != nil {
-			return fmt.Errorf("create Splunk HEC request for recovered file at offset %d: %w", recoveryEvent.OffsetStart, err)
-		}
-		req.Header.Set("Authorization", "Splunk "+splunkToken)
-		req.Header.Set("Content-Type", "application/json")
-
-		resp, err := client.Do(req)
-		if err != nil {
 			return fmt.Errorf("send recovered-file event at offset %d to Splunk HEC: %w", recoveryEvent.OffsetStart, err)
 		}
-		_, readErr := io.Copy(io.Discard, resp.Body)
-		closeErr := resp.Body.Close()
-		if readErr != nil {
-			return fmt.Errorf("read Splunk HEC response for recovered file at offset %d: %w", recoveryEvent.OffsetStart, readErr)
-		}
-		if closeErr != nil {
-			return fmt.Errorf("close Splunk HEC response for recovered file at offset %d: %w", recoveryEvent.OffsetStart, closeErr)
-		}
-		if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-			return fmt.Errorf("Splunk HEC rejected recovered-file event at offset %d: unexpected HTTP status %s", recoveryEvent.OffsetStart, resp.Status)
-		}
+	}
+	return nil
+}
+
+func postToSplunkHEC(ctx context.Context, client *http.Client, endpoint, token string, payload SplunkHECPayload) error {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal Splunk HEC payload: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("create Splunk HEC request: %w", err)
+	}
+	req.Header.Set("Authorization", "Splunk "+token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("send request to Splunk HEC: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBytes, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	if err != nil {
+		return fmt.Errorf("read Splunk HEC response: %w", err)
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("Splunk HEC rejected event (status %s): %s", resp.Status, strings.TrimSpace(string(respBytes)))
 	}
 	return nil
 }
@@ -183,25 +167,8 @@ func ShipLogFileToSplunk(logPath, hecURL, hecToken string) error {
 			SourceType: "xbow:findings:json",
 			Event:      append(json.RawMessage(nil), line...),
 		}
-		body, err := json.Marshal(payload)
-		if err != nil {
-			return fmt.Errorf("encode Splunk HEC payload for line %d: %w", lineNumber, err)
-		}
-
-		req, err := http.NewRequest(http.MethodPost, hecURL, bytes.NewReader(body))
-		if err != nil {
-			return fmt.Errorf("create Splunk HEC request for line %d: %w", lineNumber, err)
-		}
-		req.Header.Set("Authorization", "Splunk "+hecToken)
-		req.Header.Set("Content-Type", "application/json")
-
-		resp, err := client.Do(req)
-		if err != nil {
+		if err := postToSplunkHEC(context.Background(), client, hecURL, hecToken, payload); err != nil {
 			return fmt.Errorf("ship security event on line %d: %w", lineNumber, err)
-		}
-		resp.Body.Close()
-		if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-			return fmt.Errorf("ship security event on line %d: unexpected HTTP status %s", lineNumber, resp.Status)
 		}
 	}
 	if err := scanner.Err(); err != nil {
