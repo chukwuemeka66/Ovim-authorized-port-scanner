@@ -37,11 +37,11 @@ type Monitor struct {
 func loadConfig() CameraConfig {
 	ip := os.Getenv("CAM_IP")
 	if ip == "" {
-		ip = "192.168.1.50"
+		ip = "127.0.0.1"
 	}
 	mjpeg := os.Getenv("CAM_MJPEG_URL")
 	if mjpeg == "" {
-		mjpeg = fmt.Sprintf("http://%s/mjpeg", ip)
+		mjpeg = fmt.Sprintf("http://%s:9000/mjpeg", ip)
 	}
 	rtsp := os.Getenv("CAM_RTSP_URL")
 	if rtsp == "" {
@@ -57,6 +57,46 @@ func loadConfig() CameraConfig {
 		RTSPURL:  rtsp,
 		Listen:   listen,
 	}
+}
+
+func loadEnvFile(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+
+	for lineNumber, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(strings.TrimSuffix(line, "\r"))
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		key, value, found := strings.Cut(line, "=")
+		if !found {
+			log.Printf("Ignoring invalid .env entry on line %d", lineNumber+1)
+			continue
+		}
+
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		if len(value) >= 2 {
+			if (value[0] == '"' && value[len(value)-1] == '"') ||
+				(value[0] == '\'' && value[len(value)-1] == '\'') {
+				value = value[1 : len(value)-1]
+			}
+		}
+		if key != "" {
+			if _, exists := os.LookupEnv(key); !exists {
+				if err := os.Setenv(key, value); err != nil {
+					return fmt.Errorf("set %s from %s: %w", key, path, err)
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func (m *Monitor) processFrame(jpegBytes []byte) {
@@ -228,6 +268,10 @@ func (m *Monitor) handleDashboard(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+	if err := loadEnvFile(".env"); err != nil {
+		log.Fatalf("Failed to load .env: %v", err)
+	}
+
 	cfg := loadConfig()
 	mon := &Monitor{cfg: cfg}
 
