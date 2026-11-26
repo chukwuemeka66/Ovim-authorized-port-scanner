@@ -29,6 +29,9 @@ security_events.log
 # Local application configuration
 .env
 
+# CCTV alert snapshots
+cctv-monitor/alerts/
+
 # Python cache and bytecode
 __pycache__/
 *.py[cod]
