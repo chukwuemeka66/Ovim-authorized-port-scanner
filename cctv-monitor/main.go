@@ -41,7 +41,7 @@ func loadConfig() CameraConfig {
 	}
 	mjpeg := os.Getenv("CAM_MJPEG_URL")
 	if mjpeg == "" {
-		mjpeg = fmt.Sprintf("http://%s:9000/mjpeg", ip)
+		mjpeg = fmt.Sprintf("http://%s:9080/mjpeg", ip)
 	}
 	rtsp := os.Getenv("CAM_RTSP_URL")
 	if rtsp == "" {
@@ -68,34 +68,34 @@ func loadEnvFile(path string) error {
 		return err
 	}
 
-	for lineNumber, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(strings.TrimSuffix(line, "\r"))
+	for _, rawLine := range strings.Split(string(data), "\n") {
+		line := strings.TrimSpace(strings.TrimSuffix(rawLine, "\r"))
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
 
-		key, value, found := strings.Cut(line, "=")
-		if !found {
-			log.Printf("Ignoring invalid .env entry on line %d", lineNumber+1)
+		key, val, ok := strings.Cut(line, "=")
+		if !ok {
 			continue
 		}
 
 		key = strings.TrimSpace(key)
-		value = strings.TrimSpace(value)
-		if len(value) >= 2 {
-			if (value[0] == '"' && value[len(value)-1] == '"') ||
-				(value[0] == '\'' && value[len(value)-1] == '\'') {
-				value = value[1 : len(value)-1]
-			}
+		val = strings.TrimSpace(val)
+		if key == "" {
+			continue
 		}
-		if key != "" {
-			if _, exists := os.LookupEnv(key); !exists {
-				if err := os.Setenv(key, value); err != nil {
-					return fmt.Errorf("set %s from %s: %w", key, path, err)
-				}
+
+		if len(val) >= 2 && ((val[0] == '"' && val[len(val)-1] == '"') || (val[0] == '\'' && val[len(val)-1] == '\'')) {
+			val = val[1 : len(val)-1]
+		}
+
+		if _, exists := os.LookupEnv(key); !exists {
+			if err := os.Setenv(key, val); err != nil {
+				return err
 			}
 		}
 	}
+
 	return nil
 }
 
