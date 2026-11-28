@@ -10,9 +10,11 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -120,7 +122,9 @@ func (m *Monitor) processFrame(jpegBytes []byte) {
 	}
 
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	var shouldSave bool
+	var alertTS time.Time
+	var alertNum int
 
 	m.latestJPEG = append([]byte(nil), jpegBytes...)
 
@@ -129,7 +133,7 @@ func (m *Monitor) processFrame(jpegBytes []byte) {
 		totalPixels := len(gray)
 		for i := 0; i < totalPixels; i++ {
 			diff := math.Abs(float64(gray[i]) - float64(m.prevGray[i]))
-			if diff > 28 {
+			if diff > 20 {
 				changedPixels++
 			}
 		}
@@ -138,19 +142,27 @@ func (m *Monitor) processFrame(jpegBytes []byte) {
 		if changeRatio > 0.04 && time.Since(m.lastAlert) > 15*time.Second {
 			m.lastAlert = time.Now()
 			m.alertCount++
-			filename := m.saveSnapshotLocked(jpegBytes, m.lastAlert)
+			alertTS = m.lastAlert
+			alertNum = m.alertCount
+			shouldSave = true
+			filename := filepath.Join("alerts", fmt.Sprintf("intrusion_%s.jpg", alertTS.Format("20060102_150405")))
 			m.lastAlertFile = filename
 			log.Printf("[INTRUSION ALERT #%d] Camera %s | Motion: %.2f%% | Snapshot: %s",
-				m.alertCount, m.cfg.IP, changeRatio*100, filename)
+				alertNum, m.cfg.IP, changeRatio*100, filename)
 		}
 	}
 
 	m.prevGray = gray
 	m.width = w
 	m.height = h
+	m.mu.Unlock()
+
+	if shouldSave {
+		m.saveSnapshot(jpegBytes, alertTS)
+	}
 }
 
-func (m *Monitor) saveSnapshotLocked(jpegBytes []byte, ts time.Time) string {
+func (m *Monitor) saveSnapshot(jpegBytes []byte, ts time.Time) string {
 	_ = os.MkdirAll("alerts", 0755)
 	name := fmt.Sprintf("intrusion_%s.jpg", ts.Format("20060102_150405"))
 	fullPath := filepath.Join("alerts", name)
@@ -282,8 +294,8 @@ func main() {
 	cfg := loadConfig()
 	mon := &Monitor{cfg: cfg}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	go mon.streamMJPEG(ctx)
 
@@ -292,9 +304,23 @@ func main() {
 	mux.HandleFunc("/snapshot.jpg", mon.handleSnapshot)
 	mux.HandleFunc("/status", mon.handleStatus)
 
+	srv := &http.Server{
+		Addr:    cfg.Listen,
+		Handler: mux,
+	}
+
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			log.Printf("Server shutdown error: %v", err)
+		}
+	}()
+
 	log.Printf("Monitoring camera %s (RTSP: %s) | Laptop UI: http://localhost%s",
 		cfg.IP, cfg.RTSPURL, cfg.Listen)
-	if err := http.ListenAndServe(cfg.Listen, mux); err != nil {
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("Server error: %v", err)
 	}
 }
