@@ -183,6 +183,13 @@ func (m *Monitor) streamMJPEG(ctx context.Context) {
 			continue
 		}
 
+		if resp.StatusCode != http.StatusOK {
+			log.Printf("MJPEG unexpected status (%s): %s; retrying in 3s...", m.cfg.IP, resp.Status)
+			_ = resp.Body.Close()
+			time.Sleep(3 * time.Second)
+			continue
+		}
+
 		contentType := resp.Header.Get("Content-Type")
 		boundary := extractBoundary(contentType)
 		if boundary == "" {
