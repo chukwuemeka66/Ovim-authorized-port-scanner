@@ -1,6 +1,9 @@
 package main
 
 import (
+	"bytes"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -98,5 +101,43 @@ func TestLoadEnvFileParsesAndRespectsExistingEnv(t *testing.T) {
 	}
 	if got := os.Getenv("CAM_MJPEG_URL"); got != "http://10.0.0.99:9080/mjpeg" {
 		t.Fatalf("expected CAM_MJPEG_URL=http://10.0.0.99:9080/mjpeg, got %q", got)
+	}
+}
+
+func TestHandleSnapshotNoFrame(t *testing.T) {
+	monitor := &Monitor{}
+	req := httptest.NewRequest(http.MethodGet, "/snapshot.jpg", nil)
+	recorder := httptest.NewRecorder()
+
+	monitor.handleSnapshot(recorder, req)
+
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("expected status %d, got %d", http.StatusNoContent, recorder.Code)
+	}
+	if recorder.Body.Len() != 0 {
+		t.Fatalf("expected empty response body, got %d bytes", recorder.Body.Len())
+	}
+}
+
+func TestHandleSnapshotReturnsCopyOfLatestFrame(t *testing.T) {
+	monitor := &Monitor{}
+	frame := []byte{0xff, 0xd8, 0x01, 0xff, 0xd9}
+	monitor.latestJPEG = append([]byte(nil), frame...)
+
+	req := httptest.NewRequest(http.MethodGet, "/snapshot.jpg", nil)
+	recorder := httptest.NewRecorder()
+	monitor.handleSnapshot(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
+	}
+	if got := recorder.Header().Get("Content-Type"); got != "image/jpeg" {
+		t.Fatalf("expected Content-Type image/jpeg, got %q", got)
+	}
+	if got := recorder.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("expected Cache-Control no-store, got %q", got)
+	}
+	if !bytes.Equal(recorder.Body.Bytes(), frame) {
+		t.Fatalf("unexpected snapshot body: %v", recorder.Body.Bytes())
 	}
 }

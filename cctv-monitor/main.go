@@ -220,11 +220,11 @@ func extractBoundary(contentType string) string {
 
 func (m *Monitor) handleSnapshot(w http.ResponseWriter, r *http.Request) {
 	m.mu.RLock()
-	frame := m.latestJPEG
+	frame := append([]byte(nil), m.latestJPEG...)
 	m.mu.RUnlock()
 
 	if len(frame) == 0 {
-		http.Error(w, "No frame available yet", http.StatusServiceUnavailable)
+		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 	w.Header().Set("Content-Type", "image/jpeg")
